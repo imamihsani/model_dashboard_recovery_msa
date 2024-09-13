@@ -1,0 +1,856 @@
+model grafik dashboard ticketing MOD/NOC
+
+public function get_eng_maintenance($filter=array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+      $sql = "
+          SELECT
+              em.recid, 
+              em.no_ticket_msa, 
+              em.tanggal_ticket_msa, 
+              YEAR(em.tanggal_ticket_msa) AS tahun, 
+              MONTH(em.tanggal_ticket_msa) AS bulan,
+							CONCAT('Week ', FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) + 1) AS minggu_ke,
+              em.id_proyek, 
+              em.id_pm, 
+              em.no_complaint_client, 
+              em.tanggal_complaint_client, 
+              em.tanggal_closing_client, 
+              em.id_client, 
+              em.tipe_maintenance, 
+              em.cabang_msa, 
+              em.cabang_client, 
+              em.region_client, 
+              em.`status`, 
+							(CASE WHEN em.`status` = 'Open' OR em.`status` = 'Action'  OR em.`status` = 'Stopclock' THEN em.`status` END) AS status_open,
+              (CASE 
+                  WHEN em.`status` = 'Stopclock' THEN 'Stopclock'
+                  WHEN em.`status` = 'Action' 
+                      AND (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 > 8 
+                  THEN 'Action > MTTR'
+                  WHEN em.`status` = 'Action' 
+                      AND ((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 8 
+                      OR TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) IS NULL 
+                      OR TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) = 0)
+                  THEN 'Action < MTTR'
+                  WHEN em.`status` = 'Open' THEN 'Unaction'
+                  ELSE em.`status`
+              END) AS status_gangguan,
+              CASE
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '00:00:00' AND '02:00:00' THEN '00:00 - 02:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '02:01:00' AND '04:00:00' THEN '02:01 - 04:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '04:01:00' AND '06:00:00' THEN '04:01 - 06:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '06:01:00' AND '08:00:00' THEN '06:01 - 08:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '08:01:00' AND '10:00:00' THEN '08:01 - 10:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '10:01:00' AND '12:00:00' THEN '10:01 - 12:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '12:01:00' AND '14:00:00' THEN '12:01 - 14:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '14:01:00' AND '16:00:00' THEN '14:01 - 16:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '16:01:00' AND '18:00:00' THEN '16:01 - 18:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '18:01:00' AND '20:00:00' THEN '18:01 - 20:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '20:01:00' AND '22:00:00' THEN '20:01 - 22:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '22:01:00' AND '23:59:59' THEN '22:01 - 24:00'
+              END AS range_complaint,
+              em.id_kategori, 
+              em.nama_tim, 
+              em.anggota_tim, 
+              em.id_alasan, 
+              em.kode_customer, 
+              em.kode_customer_aktual, 
+              em.nama_customer, 
+              em.site_name_customer, 
+              em.address_customer, 
+              em.co_olt, 
+              em.tipe_solusi, 
+              em.root_cause, 
+              em.detail_solusi, 
+              em.lokasi_latitude, 
+              em.lokasi_longitude, 
+              em.lokasi_latitude_client, 
+              em.lokasi_longitude_client, 
+              em.service_impact, 
+              em.checklist, 
+              em.tes_ofi_tx, 
+              em.tes_ofi_rx, 
+              em.tes_opm_in, 
+              em.tes_opm_out, 
+              em.tes_otdr_core1, 
+              em.tes_otdr_core2,
+              krono.total_stopclock,
+              alasan.alasan,
+              CONCAT(
+                  FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) / 86400), ' days, ',
+                  LPAD(FLOOR(((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) % 86400) / 3600), 2, '0'), ' hours, ',
+                  LPAD(FLOOR((((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) % 3600) / 60)), 2, '0'), ' minutes'
+              ) AS aging_hours,
+              CASE 
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 4 THEN '0-4 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 8 THEN '4-8 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 12 THEN '8-12 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 24 THEN '12-24 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 > 24 THEN '+24 hours'
+              END AS jangka_range_hours,
+              CASE
+                  WHEN em.tanggal_complaint_client IS NULL OR em.tanggal_closing_client IS NULL THEN NULL
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                        IFNULL(krono.total_stopclock_seconds, 0)) / 3600 > 8 THEN 'Out of SLA'
+                  ELSE 'Within SLA'
+              END AS sla,
+              cab.waktu_indonesia,
+              FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+							IFNULL(krono.total_stopclock_seconds, 0)) / 60) AS menit,
+              (100 - ((FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                  IFNULL(krono.total_stopclock_seconds, 0)) / 60) - 490) / 6 / 100)) AS sla_value, 
+              CASE 
+                  WHEN ((FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                      IFNULL(krono.total_stopclock_seconds, 0)) / 60) - 490) / 6 / 100) <= 0 
+                  THEN '100' 
+                  ELSE ROUND((100 - ((FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                      IFNULL(krono.total_stopclock_seconds, 0)) / 60) - 490) / 6 / 100)), 2) 
+              END AS sla_persen, 
+              DATE(em.tanggal_ticket_msa) AS tanggal_filter
+            FROM
+                eng_maintenance em
+            LEFT JOIN (
+                SELECT
+                    id_ticket,
+                    SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stopclock_seconds,
+                    CONCAT(
+                        FLOOR(SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) / 86400), ' days, ',
+                        LPAD(FLOOR((SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) % 86400) / 3600), 2, '0'), ' hours, ',
+                        LPAD(FLOOR((SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) % 3600) / 60), 2, '0'), ' minutes'
+                    ) AS total_stopclock
+                FROM (
+                    SELECT
+                        t1.id_ticket,
+                        t1.`time` AS start_time,
+                        MIN(t2.`time`) AS end_time
+                    FROM
+                        eng_maintenance_kronologis t1
+                    INNER JOIN
+                        eng_maintenance_kronologis t2 ON t1.id_ticket = t2.id_ticket AND t2.id_aktivitas = '13'
+                    WHERE
+                        t1.id_aktivitas = '12' AND t1.`time` < t2.`time`
+                    GROUP BY
+                        t1.id_ticket, t1.`time`
+                ) krono_data
+                GROUP BY
+                    id_ticket
+            ) krono ON em.recid = krono.id_ticket
+            LEFT JOIN `hrd - cabang` cab ON em.cabang_msa = cab.nama_cabang
+          LEFT JOIN eng_maintenance_alasan alasan ON em.id_alasan = alasan.recid
+          
+      ";
+      $criteria = array();
+
+      if (isset($filter['dari'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) >= '" . $filter['dari'] . "'";
+      }
+
+      if (isset($filter['daridaily'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) = '" . $filter['daridaily'] . "'";
+      }
+
+      if (isset($filter['daridailykemarinkemarinjuga'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) <= '" . $filter['daridailykemarinkemarinjuga'] . "'";
+      }
+
+      if (isset($filter['darinew'])) {
+        $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      }
+
+      if (isset($filter['sampai'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) <= '" . $filter['sampai'] . "'";
+      }
+
+      if (isset($filter['year'])) {
+        $criteria[] = "YEAR(em.tanggal_ticket_msa) = '" . $filter['year'] . "'";
+      }
+
+      if (isset($filter['cabang_msa'])) {
+        $criteria[] = "em.cabang_msa = '" . $filter['cabang_msa'] . "'";
+      }
+
+      if (isset($filter['tipe_maintenance'])) {
+        $criteria[] = "em.tipe_maintenance = '" . $filter['tipe_maintenance'] . "'";
+      }
+
+      if (isset($filter['region_client'])) {
+        $criteria[] = "em.region_client = '" . $filter['region_client'] . "'";
+      }
+
+      if ($criteria) {
+        $sql .= " WHERE " . implode(' AND ', $criteria);
+      }
+
+      $sql .= " GROUP BY em.recid";
+
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+        // $query = $DB2->query($sql);
+        // $data = $query->result_array();
+        // return $data;
+    }
+
+    public function get_eng_maintenance_siweekly($filter = array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+  
+      $sql = "
+      SELECT
+          DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') AS bulan,
+          em.region_client,
+          em.service_impact,
+          COUNT(*) AS total_tickets,
+          SUM(CASE WHEN FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) = 0 THEN 1 ELSE 0 END) AS week_1,
+          SUM(CASE WHEN FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) = 1 THEN 1 ELSE 0 END) AS week_2,
+          SUM(CASE WHEN FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) = 2 THEN 1 ELSE 0 END) AS week_3,
+          SUM(CASE WHEN FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) = 3 THEN 1 ELSE 0 END) AS week_4,
+          SUM(CASE WHEN FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) = 4 THEN 1 ELSE 0 END) AS week_5
+      FROM
+          eng_maintenance em
+      WHERE
+          em.service_impact IS NOT NULL
+          AND em.service_impact <> ''
+          AND em.tipe_maintenance = 'Recovery' -- query tambahan buat ngambil recovery doang
+      ";
+  
+      // Tambahkan kondisi filter
+      $criteria = array();
+  
+      if (isset($filter['darinew'])) {
+          $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      }
+  
+      if (isset($filter['region_client'])) {
+          $criteria[] = "em.region_client = '" . $filter['region_client'] . "'";
+      }
+  
+      if ($criteria) {
+          $sql .= " AND " . implode(' AND ', $criteria);
+      }
+  
+      // Tambahkan GROUP BY dan ORDER BY
+      $sql .= "
+      GROUP BY
+          DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m'),
+          em.region_client,
+          em.service_impact
+      ORDER BY
+          DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') DESC,
+          em.region_client ASC,
+          em.service_impact ASC;
+      ";
+  
+      log_message('debug', "SQL Query: " . $sql);
+      $query = $DB2->query($sql);
+      $result = $query->result_array();
+      log_message('debug', "Query Result: " . print_r($result, true));
+  
+      return $result;
+    }
+  
+    public function get_eng_maintenance_week($filter=array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+      $sql = "
+          SELECT
+              em.recid, 
+              em.no_ticket_msa, 
+              em.tanggal_ticket_msa, 
+              YEAR(em.tanggal_ticket_msa) AS tahun, 
+              MONTH(em.tanggal_ticket_msa) AS bulan,
+							WEEK(em.tanggal_ticket_msa,1) AS minggu,
+              em.id_proyek, 
+              em.id_pm, 
+              em.no_complaint_client, 
+              em.tanggal_complaint_client, 
+              em.tanggal_closing_client, 
+              em.id_client, 
+              em.tipe_maintenance, 
+              em.cabang_msa, 
+              em.cabang_client, 
+              em.region_client, 
+              em.`status`, 
+							(CASE WHEN em.`status` = 'Open' OR em.`status` = 'Action'  OR em.`status` = 'Stopclock' THEN em.`status` END) AS status_open,
+              (CASE 
+                  WHEN em.`status` = 'Stopclock' THEN 'Stopclock'
+                  WHEN em.`status` = 'Action' 
+                      AND (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 > 8 
+                  THEN 'Action > MTTR'
+                  WHEN em.`status` = 'Action' 
+                      AND ((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 8 
+                      OR TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) IS NULL 
+                      OR TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) = 0)
+                  THEN 'Action < MTTR'
+                  WHEN em.`status` = 'Open' THEN 'Unaction'
+                  ELSE em.`status`
+              END) AS status_gangguan,
+              CASE
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '00:00:00' AND '02:00:00' THEN '00:00 - 02:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '02:01:00' AND '04:00:00' THEN '02:01 - 04:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '04:01:00' AND '06:00:00' THEN '04:01 - 06:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '06:01:00' AND '08:00:00' THEN '06:01 - 08:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '08:01:00' AND '10:00:00' THEN '08:01 - 10:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '10:01:00' AND '12:00:00' THEN '10:01 - 12:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '12:01:00' AND '14:00:00' THEN '12:01 - 14:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '14:01:00' AND '16:00:00' THEN '14:01 - 16:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '16:01:00' AND '18:00:00' THEN '16:01 - 18:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '18:01:00' AND '20:00:00' THEN '18:01 - 20:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '20:01:00' AND '22:00:00' THEN '20:01 - 22:00'
+                  WHEN TIME(em.tanggal_complaint_client) BETWEEN '22:01:00' AND '23:59:59' THEN '22:01 - 24:00'
+              END AS range_complaint,
+              em.id_kategori, 
+              em.nama_tim, 
+              em.anggota_tim, 
+              em.id_alasan, 
+              em.kode_customer, 
+              em.kode_customer_aktual, 
+              em.nama_customer, 
+              em.site_name_customer, 
+              em.address_customer, 
+              em.co_olt, 
+              em.tipe_solusi, 
+              em.root_cause, 
+              em.detail_solusi, 
+              em.lokasi_latitude, 
+              em.lokasi_longitude, 
+              em.lokasi_latitude_client, 
+              em.lokasi_longitude_client, 
+              em.service_impact, 
+              em.checklist, 
+              em.tes_ofi_tx, 
+              em.tes_ofi_rx, 
+              em.tes_opm_in, 
+              em.tes_opm_out, 
+              em.tes_otdr_core1, 
+              em.tes_otdr_core2,
+              krono.total_stopclock,
+              alasan.alasan,
+              CONCAT(
+                  FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) / 86400), ' days, ',
+                  LPAD(FLOOR(((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) % 86400) / 3600), 2, '0'), ' hours, ',
+                  LPAD(FLOOR((((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) -
+                      IFNULL(krono.total_stopclock_seconds, 0)) % 3600) / 60)), 2, '0'), ' minutes'
+              ) AS aging_hours,
+              CASE 
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 4 THEN '0-4 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 8 THEN '4-8 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 12 THEN '8-12 hours'
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600 <= 24 THEN '12-24 hours'
+              END AS jangka_range_hours,
+              CASE
+                  WHEN em.tanggal_complaint_client IS NULL OR em.tanggal_closing_client IS NULL THEN NULL
+                  WHEN (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                        IFNULL(krono.total_stopclock_seconds, 0)) / 3600 > 8 THEN 'Out of SLA'
+                  ELSE 'Within SLA'
+              END AS sla,
+              cab.waktu_indonesia,
+              DATE(em.tanggal_ticket_msa) AS tanggal_filter
+          FROM
+              eng_maintenance em
+          LEFT JOIN (
+              SELECT
+                  id_ticket,
+                  SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stopclock_seconds,
+                  CONCAT(
+                      FLOOR(SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) / 86400), ' days, ',
+                      LPAD(FLOOR((SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) % 86400) / 3600), 2, '0'), ' hours, ',
+                      LPAD(FLOOR((SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) % 3600) / 60), 2, '0'), ' minutes'
+                  ) AS total_stopclock
+              FROM (
+                  SELECT
+                      t1.id_ticket,
+                      t1.`time` AS start_time,
+                      MIN(t2.`time`) AS end_time
+                  FROM
+                      eng_maintenance_kronologis t1
+                  INNER JOIN
+                      eng_maintenance_kronologis t2 ON t1.id_ticket = t2.id_ticket AND t2.id_aktivitas = '13'
+                  WHERE
+                      t1.id_aktivitas = '12' AND t1.`time` < t2.`time`
+                  GROUP BY
+                      t1.id_ticket, t1.`time`
+              ) krono_data
+              GROUP BY
+                  id_ticket
+          ) krono ON em.recid = krono.id_ticket
+          LEFT JOIN `hrd - cabang` cab ON em.cabang_msa = cab.nama_cabang
+          LEFT JOIN eng_maintenance_alasan alasan ON em.id_alasan = alasan.recid
+          
+      ";
+      $criteria = array();
+
+      if (isset($filter['dari'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) >= '" . $filter['dari'] . "'";
+      }
+
+      if (isset($filter['daridaily'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) = '" . $filter['daridaily'] . "'";
+      }
+
+      if (isset($filter['darinew'])) {
+        $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      }
+
+      if (isset($filter['sampai'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) <= '" . $filter['sampai'] . "'";
+      }
+
+      if (isset($filter['year'])) {
+        $criteria[] = "YEAR(em.tanggal_ticket_msa) = '" . $filter['year'] . "'";
+      }
+
+      if (isset($filter['cabang_msa'])) {
+        $criteria[] = "em.cabang_msa = '" . $filter['cabang_msa'] . "'";
+      }
+
+      if (isset($filter['tipe_maintenance'])) {
+        $criteria[] = "em.tipe_maintenance = '" . $filter['tipe_maintenance'] . "'";
+      }
+
+      if (isset($filter['region_client'])) {
+        $criteria[] = "em.region_client = '" . $filter['region_client'] . "'";
+      }
+
+      if ($criteria) {
+        $sql .= " WHERE " . implode(' AND ', $criteria);
+      }
+
+      // $sql .= " GROUP BY em.recid";
+      $sql.=" GROUP BY YEAR(em.tanggal_ticket_msa), MONTH(em.tanggal_ticket_msa), WEEK(em.tanggal_ticket_msa, 1)";
+
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+        // $query = $DB2->query($sql);
+        // $data = $query->result_array();
+        // return $data;
+    }
+
+    public function get_durasi_gangguan($filter=array()){
+      $DB2 = $this->load->database('old_db',TRUE);
+      
+      $sql = "
+          SELECT 
+              YEAR(em.tanggal_ticket_msa) AS tahun,
+              em.region_client,                      
+              MONTH(em.tanggal_ticket_msa) AS bulan,
+              ROUND(
+                  AVG(
+                      (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                  ), 4
+              ) AS ratarata_desimal,
+              CONCAT(
+                  FLOOR(
+                      AVG(
+                          (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                      )
+                  ), '.', 
+                  LPAD(
+                      ROUND(
+                          (
+                              AVG(
+                                  (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                              ) - FLOOR(
+                                  AVG(
+                                      (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                                  )
+                              )
+                          ) * 60
+                      ), 2, '0'
+                  )
+              ) AS rata_rata
+          FROM 
+              eng_maintenance em
+          LEFT JOIN (
+              SELECT 
+                  start_time.id_ticket,
+                  SUM(TIMESTAMPDIFF(SECOND, start_time.time, end_time.time)) AS total_stopclock_seconds
+              FROM 
+                  eng_maintenance_kronologis start_time
+              LEFT JOIN 
+                  eng_maintenance_kronologis end_time 
+              ON 
+                  start_time.id_ticket = end_time.id_ticket 
+                  AND start_time.id_aktivitas = '12' 
+                  AND end_time.id_aktivitas = '13' 
+                  AND start_time.time < end_time.time
+              GROUP BY 
+                  start_time.id_ticket
+          ) krono ON em.recid = krono.id_ticket
+      ";
+      
+      $criteria = array();
+      if (isset($filter['year'])) {
+          $criteria[] = "YEAR(em.tanggal_ticket_msa) = '" . $DB2->escape_str($filter['year']) . "'";
+      }
+      if (isset($filter['region_client'])) {
+          $criteria[] = "em.region_client = '" . $DB2->escape_str($filter['region_client']) . "'";
+      }
+      
+      if ($criteria) {
+          $sql .= " WHERE " . implode(' AND ', $criteria);
+      }
+      
+      $sql .= " GROUP BY em.region_client, MONTH(em.tanggal_ticket_msa)";
+      
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+    }
+
+    public function get_durasi_gangguan_weekly($filter = array()) {
+        $DB2 = $this->load->database('old_db', TRUE);
+
+        $sql = "
+            SELECT 
+                em.tanggal_ticket_msa,
+                YEAR(em.tanggal_ticket_msa) AS tahun,
+                em.region_client,
+                MONTH(em.tanggal_ticket_msa) AS bulan,
+                CONCAT('Week ', FLOOR((DAY(em.tanggal_ticket_msa) - 1) / 7) + 1) AS minggu_ke,
+                ROUND(
+                    AVG(
+                        (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                    ), 4
+                ) AS ratarata_desimal,
+                CONCAT(
+                    FLOOR(
+                        AVG(
+                            (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                        )
+                    ), '.', 
+                    LPAD(
+                        ROUND(
+                            (
+                                AVG(
+                                    (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                                ) - FLOOR(
+                                    AVG(
+                                        (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                                    )
+                                )
+                            ) * 60
+                        ), 2, '0'
+                    )
+                ) AS rata_rata
+            FROM 
+                eng_maintenance em
+            LEFT JOIN (
+                SELECT 
+                    start_time.id_ticket,
+                    SUM(TIMESTAMPDIFF(SECOND, start_time.time, end_time.time)) AS total_stopclock_seconds
+                FROM 
+                    eng_maintenance_kronologis start_time
+                LEFT JOIN 
+                    eng_maintenance_kronologis end_time 
+                ON 
+                    start_time.id_ticket = end_time.id_ticket 
+                    AND start_time.id_aktivitas = '12' 
+                    AND end_time.id_aktivitas = '13' 
+                    AND start_time.time < end_time.time
+                GROUP BY 
+                    start_time.id_ticket
+            ) krono ON em.recid = krono.id_ticket
+        ";
+
+        $criteria = array();
+        if (isset($filter['darinew'])) {
+            $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+        }
+
+        if (isset($filter['year'])) {
+            $criteria[] = "YEAR(em.tanggal_ticket_msa) = '" . $DB2->escape_str($filter['year']) . "'";
+        }
+        if (isset($filter['region_client'])) {
+            $criteria[] = "em.region_client = '" . $DB2->escape_str($filter['region_client']) . "'";
+        }
+
+        if ($criteria) {
+            $sql .= " WHERE " . implode(' AND ', $criteria);
+        }
+
+        $sql .= " GROUP BY em.region_client, MONTH(em.tanggal_ticket_msa), minggu_ke";
+
+        $query = $DB2->query($sql)->result_array();
+        return $query;
+    }
+
+    public function get_durasi_gangguan_daily($filter=array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+      $sql="
+            SELECT 
+            DATE(em.tanggal_ticket_msa) AS tanggal_ticket_msa,
+            YEAR(em.tanggal_ticket_msa) AS tahun,
+            em.region_client,
+            ROUND(
+                AVG(
+                    (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                ), 4
+            ) AS ratarata_desimal,
+            CONCAT(
+                FLOOR(
+                    AVG(
+                        (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                    )
+                ), '.', 
+                LPAD(
+                    ROUND(
+                        (
+                            AVG(
+                                (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                            ) - FLOOR(
+                                AVG(
+                                    (TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 3600
+                                )
+                            )
+                        ) * 60
+                    ), 2, '0'
+                )
+            ) AS rata_rata
+        FROM 
+            eng_maintenance em
+        LEFT JOIN (
+            SELECT 
+                start_time.id_ticket,
+                SUM(TIMESTAMPDIFF(SECOND, start_time.time, end_time.time)) AS total_stopclock_seconds
+            FROM 
+                eng_maintenance_kronologis start_time
+            LEFT JOIN 
+                eng_maintenance_kronologis end_time 
+            ON 
+                start_time.id_ticket = end_time.id_ticket 
+                AND start_time.id_aktivitas = '12' 
+                AND end_time.id_aktivitas = '13' 
+                AND start_time.time < end_time.time
+            GROUP BY 
+                start_time.id_ticket
+        ) krono ON em.recid = krono.id_ticket
+        
+      ";
+      $criteria = array();
+
+      $criteria[] = "em.tipe_maintenance = 'Recovery'"; //ini tambahan buat cuma ngambil yang recovery aja
+
+
+        if (!empty($filter['darinew'])) {
+            $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+        }
+
+        if (!empty($filter['year'])) {
+            $criteria[] = "YEAR(em.tanggal_ticket_msa) = '" . $DB2->escape_str($filter['year']) . "'";
+        }
+        if (!empty($filter['region_client'])) {
+            $criteria[] = "em.region_client = '" . $DB2->escape_str($filter['region_client']) . "'";
+        }
+
+        if ($criteria) {
+            $sql .= " WHERE " . implode(' AND ', $criteria);
+        }
+
+        $sql .= " GROUP BY DATE(em.tanggal_ticket_msa)";
+
+        $query = $DB2->query($sql)->result_array();
+        return $query;
+    }
+
+    public function get_ratarata_mttrmonthly($filter=array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+      $sql="
+        SELECT 
+            DATE_FORMAT(em.tanggal_ticket_msa,'%Y-%m') AS bulan_tahun,
+            em.region_client,
+            CONCAT(
+                FLOOR(AVG((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                    IFNULL(krono.total_stopclock_seconds, 0)) / 3600)), ',',
+                LPAD(FLOOR((AVG((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                    IFNULL(krono.total_stopclock_seconds, 0)) % 3600) / 60)), 2, '0')
+            ) AS rata_rata_aging_hours
+        FROM
+            eng_maintenance em
+        LEFT JOIN (
+            SELECT
+                id_ticket,
+                SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stopclock_seconds
+            FROM (
+                SELECT
+                    t1.id_ticket,
+                    t1.`time` AS start_time,
+                    MIN(t2.`time`) AS end_time
+                FROM
+                    eng_maintenance_kronologis t1
+                INNER JOIN
+                    eng_maintenance_kronologis t2 ON t1.id_ticket = t2.id_ticket AND t2.id_aktivitas = '13'
+                WHERE
+                    t1.id_aktivitas = '12' AND t1.`time` < t2.`time`
+                GROUP BY
+                    t1.id_ticket, t1.`time`
+            ) krono_data
+            GROUP BY
+                id_ticket
+        ) krono ON em.recid = krono.id_ticket
+        LEFT JOIN `hrd - cabang` cab ON em.cabang_msa = cab.nama_cabang
+        LEFT JOIN eng_maintenance_alasan alasan ON em.id_alasan = alasan.recid 
+        
+      ";
+      $criteria = array();
+
+      $criteria[] = "em.tipe_maintenance = 'Recovery'"; //ini tambahan buat cuma ngambil yang recovery aja
+
+      // if (isset($filter['darinew'])) {
+      //   $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      // }
+
+      // if (isset($filter['region_client'])) {
+      //   $criteria[] = "em.region_client = '" . $filter['region_client'] . "'";
+      // }
+
+      // if ($criteria) {
+      //   $sql .= " WHERE " . implode(' AND ', $criteria);
+      // }
+
+      if (!empty($filter['darinew'])) {
+          $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      }
+
+      if (!empty($filter['region_client'])) {
+          $criteria[] = "em.region_client = '" . $filter['region_client'] . "'";
+      }
+
+      if (!empty($criteria)) {
+          $sql .= " WHERE " . implode(' AND ', $criteria);
+      }
+
+      $sql .= " GROUP BY em.region_client, DATE_FORMAT(em.tanggal_ticket_msa,'%Y-%m')";
+
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+    }
+
+    public function get_ratarata_mttrdailyfixed($filter=array()){
+      $DB2 = $this->load->database('old_db', TRUE);
+      $sql="
+        SELECT 
+              em.tanggal_ticket_msa,
+              em.region_client,
+              CONCAT(
+                  FLOOR(AVG((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                      IFNULL(krono.total_stopclock_seconds, 0)) / 3600)), ',',
+                  LPAD(FLOOR((AVG((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - 
+                      IFNULL(krono.total_stopclock_seconds, 0)) % 3600) / 60)), 2, '0')
+              ) AS rata_rata_aging_hours
+          FROM
+              eng_maintenance em
+          LEFT JOIN (
+              SELECT
+                  id_ticket,
+                  SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stopclock_seconds
+              FROM (
+                  SELECT
+                      t1.id_ticket,
+                      t1.`time` AS start_time,
+                      MIN(t2.`time`) AS end_time
+                  FROM
+                      eng_maintenance_kronologis t1
+                  INNER JOIN
+                      eng_maintenance_kronologis t2 ON t1.id_ticket = t2.id_ticket AND t2.id_aktivitas = '13'
+                  WHERE
+                      t1.id_aktivitas = '12' AND t1.`time` < t2.`time`
+                  GROUP BY
+                      t1.id_ticket, t1.`time`
+              ) krono_data
+              GROUP BY
+                  id_ticket
+          ) krono ON em.recid = krono.id_ticket
+          LEFT JOIN `hrd - cabang` cab ON em.cabang_msa = cab.nama_cabang
+          LEFT JOIN eng_maintenance_alasan alasan ON em.id_alasan = alasan.recid 
+        ";
+      $criteria = array();
+
+      // if (isset($filter['daridaily'])) {
+      //   $criteria[] = "DATE(em.tanggal_ticket_msa) = '" . $filter['daridaily'] . "'";
+      // }
+
+      // if (isset($filter['regionclientdaily'])) {
+      //   $criteria[] = "em.region_client = '" . $filter['regionclientdaily'] . "'";
+      // }
+
+      // if ($criteria) {
+      //   $sql .= " WHERE " . implode(' AND ', $criteria);
+      // }
+
+      $criteria[] = "em.tipe_maintenance = 'Recovery'"; //ini tambahan buat cuma ngambil yang recovery aja
+
+
+      if (!empty($filter['daridaily'])) {
+        $criteria[] = "DATE(em.tanggal_ticket_msa) = '" . $filter['daridaily'] . "'";
+      }
+
+      if (!empty($filter['regionclientdaily'])) {
+        $criteria[] = "em.region_client = '" . $filter['regionclientdaily'] . "'";
+      }
+
+      if (!empty($criteria)) {
+          $sql .= " WHERE " . implode(' AND ', $criteria);
+      }
+
+      $sql .= " GROUP BY em.region_client, em.tanggal_ticket_msa";
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+    }
+
+    public function get_chart_kpi($filter=array()){
+      $DB2=$this->load->database('old_db',TRUE);
+      $sql="
+        SELECT
+        DATE_FORMAT(em.tanggal_ticket_msa,'%Y-%m') AS tanggal,
+        YEAR(em.tanggal_ticket_msa) AS tahun,
+        MONTH(em.tanggal_ticket_msa) AS bulan,
+        em.region_client,
+        SUM(FLOOR((TIMESTAMPDIFF(SECOND, em.tanggal_complaint_client, em.tanggal_closing_client) - IFNULL(krono.total_stopclock_seconds, 0)) / 60)) AS total_menit,
+        SUBSTRING(LAST_DAY(DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m-%d')), 9, 2) AS jumlah_hari
+        FROM
+            eng_maintenance em
+        LEFT JOIN (
+            SELECT
+                id_ticket,
+                SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stopclock_seconds
+            FROM (
+                SELECT
+                    t1.id_ticket,
+                    t1.`time` AS start_time,
+                    MIN(t2.`time`) AS end_time
+                FROM
+                    eng_maintenance_kronologis t1
+                INNER JOIN
+                    eng_maintenance_kronologis t2 ON t1.id_ticket = t2.id_ticket AND t2.id_aktivitas = '13'
+                WHERE
+                    t1.id_aktivitas = '12' AND t1.`time` < t2.`time`
+                GROUP BY
+                    t1.id_ticket, t1.`time`
+            ) krono_data
+            GROUP BY
+                id_ticket
+        ) krono ON em.recid = krono.id_ticket
+        WHERE em.tipe_maintenance = 'Recovery'
+        
+  
+      ";
+      $criteria = array();
+      if (isset($filter['darinew'])) {
+        $criteria[] = "DATE_FORMAT(em.tanggal_ticket_msa, '%Y-%m') = '" . date('Y-m', strtotime($filter['darinew'])) . "'";
+      }
+
+      if (isset($filter['region_client'])) {
+          $criteria[] = "em.region_client = '" . $DB2->escape_str($filter['region_client']) . "'";
+      }
+
+      if ($criteria) {
+        $sql .= " AND " . implode(' AND ', $criteria);
+      }
+
+      $sql .= " GROUP BY YEAR(em.tanggal_ticket_msa), MONTH(em.tanggal_ticket_msa), em.region_client
+                ORDER BY YEAR(em.tanggal_ticket_msa), MONTH(em.tanggal_ticket_msa), em.region_client";
+      $query = $DB2->query($sql)->result_array();
+      return $query;
+    }
